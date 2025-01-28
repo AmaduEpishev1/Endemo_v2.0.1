@@ -137,7 +137,8 @@ class Subsectorsettings:
                     df = df[df['Active'] == True] # this ensures that we are processing only active subsecors
                     df = df.set_index('Subsector')
                     sector = Sector(sector_name)
-                    sector.sector_settings = df
+                    sector.sector_settings = df # #TODO now we need to use the settings form the instance
+                    self.subsector_settings[sheet_name] = df
                 except Exception as e:
                     print(f"Error reading sheet {sheet_name}: {e}")
             else:

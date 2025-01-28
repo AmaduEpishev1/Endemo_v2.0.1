@@ -1,264 +1,175 @@
 import pandas as pd
+from endemo2.input_and_settings.input_sect_sub_var import  UsefulenergyRegion
 import os
 
 class UsefulEnergyCalculator:
-    def __init__(self, input_manager, predictions):
+    def __init__(self, input_manager, input):
         """
         Initialize the UsefulEnergyCalculator.
-
         :param input_manager: InputManager instance providing access to settings and subsector configurations.
-        :param predictions: Nested dictionary containing prediction results for ECU and DDet variables.
+        :param input: list of sector objects that were processed in the forecast model.
         """
         self.input_manager = input_manager
-        self.predictions = predictions
+        self.predictions = input
         self.all_sectors_UE = {}  # To store results  by sector
         self.calculate_useful_energy()
-        self.save_results_to_excel()
+        self.write_sector_predictions_to_excel()
 
     def calculate_useful_energy(self):
         """
         Calculate useful energy as ECU * product(DDet[Technology][Type]) for each subsector,
         for each combination of DDet, Technology, and Type.
         """
-        subsector_settings = self.input_manager.subsector_settings.subsector_settings
+        # Initialize the dictionary to store UsefulenergyRegion objects by region
+        region_ue_dict = {}
         general_settings = self.input_manager.general_settings
         active_regions = self.input_manager.ctrl.GEN_settings.active_regions
-
-        forecast_year_range = list(range(
-            general_settings.forecast_year_start,
-            general_settings.forecast_year_end + 1,
-            general_settings.forecast_year_step,
-        ))
-
-        for sector_name, sector_df in self.predictions.items():
-            # List to hold all subsector DataFrames for the current sector
-            sector_results = []
-
-            # Identify unique subsectors within the sector DataFrame
-            unique_subsectors = sector_df['Subsector'].unique()
-
-            for subsector_name in unique_subsectors:
-                # Extract DataFrame for the current subsector
-                subsector_predictions = sector_df[sector_df['Subsector'] == subsector_name].copy()
-                # Retrieve settings for the current subsector
-                settings = subsector_settings.get(f"{sector_name}_subsectors")
-                ecu_name, ddet_names, _ = self._extract_ecu_ddet_and_tech(settings, subsector_name)
-                # Normalize the DataFrame
-                normalized_subsector_df = self.normalize_df(subsector_predictions, ddet_names)
-
+        forecast_year_range = general_settings.get_forecast_year_range()
+        active_regions = [region for region in active_regions if region != "default"]
+        for sector in self.predictions:
+            sector_name = sector.name
+            ue_per_sector = []
+            for subsector in sector.subsectors:
                 # Gather region-level results for this subsector
-                subsector_results = []
-                for region in active_regions:
-                    region_group_df = normalized_subsector_df[normalized_subsector_df["Region"] == region]
-                    results_UE_region = self._process_region_data(
-                        region, region_group_df, ecu_name, ddet_names, forecast_year_range,
-                        sector_name, subsector_name
-                    )
-                    if not results_UE_region.empty:
-                        results_UE_region = results_UE_region.drop(columns=['Variable',"Coefficients","Equation"])
-                        subsector_results.append(results_UE_region)
+                ecu = subsector.ecu
+                technologies = subsector.technologies
+                subsector_name = subsector.name
+                ue_per_subsectors = []
+                for technology in technologies:
+                    technology_name = technology.name
+                    ddets = technology.ddets # list of dddet variables per technology
+                    ue_per_technology_for_all_regions = self.calculate_ue_regios(ecu, ddets, active_regions,
+                                                                                 forecast_year_range, region_ue_dict, subsector_name,
+                                                                                 technology_name, sector_name)
+                    technology.energy_UE = ue_per_technology_for_all_regions
+                    ue_per_subsectors.append(ue_per_technology_for_all_regions) #adding  the technology to the subsector that it belongs
+                ue_per_subsector = pd.concat(ue_per_subsectors, ignore_index=True)
+                subsector.energy_UE = ue_per_subsector #TODO i dont know why i am saving each co
+                ue_per_sector.append(ue_per_subsector)
+            ue_sector = pd.concat(ue_per_sector, ignore_index=True)
+            sector.energy_UE = ue_sector # now sector holds all regions which is not completly right
+        self.export_region_data(region_ue_dict)
 
-                # Concatenate all region-level results for the subsector
-                if subsector_results:
-                    subsector_UE_df = pd.concat(subsector_results, ignore_index=True)
-                    sector_results.append(subsector_UE_df)
-
-            # Concatenate all subsector DataFrames for the current sector
-            if sector_results:
-                sector_UE_df = pd.concat(sector_results, ignore_index=True)
-                self.all_sectors_UE[sector_name] = sector_UE_df
-
-    def save_results_to_excel(self):
-        """
-        Save results to Excel files, one per sector, with a single sheet for each sector.
-
-        """
-        output_path = self.input_manager.output_path
-        if not os.path.exists(output_path):
-            os.makedirs(output_path)
-
-        for sector_name, sector_df in self.all_sectors_UE.items():
-            column_order = ["Region", "Sector", "Subsector", "Technology","Type", "Variables"] + [
-                col for col in sector_df.columns if
-                col not in ["Region", "Sector", "Subsector", "Technology","Type", "Variables"]   ]
-            sector_df = sector_df[column_order]
-            # Construct the file name based on the sector name
-            file_name = os.path.join(output_path, f"UE_{sector_name}.xlsx")
-            # Save the sector DataFrame to an Excel file
-            sector_df.to_excel(file_name, index=False, sheet_name="Data")
-            print(f"Results saved for sector: {sector_name} in file: {file_name}")
-
-    def _process_region_data(self, region, region_group_df, ecu_name, ddet_names, forecast_year_range, sector_name,
-                             subsector_name):
+    def calculate_ue_regios(self, ecu, ddets, active_regions, forecast_year_range, region_ue_dict,
+                            subsector_name, technology_name, sector_name):
         """
         Calculate useful energy for each Technology dynamically.
-
-        :param region: The region name for which to calculate useful energy.
-        :param region_group_df: DataFrame containing data for the specific region and subsector.
-        :param ecu_name: Name of the ECU variable.
-        :param ddet_names: List of DDet variable names.
+        :param ecu: The ecu of the region
+        :param ddets: list of subsector's technology's ddets
+        :param active_regions: list of regions for calculations.
         :param forecast_year_range: List of forecast years.
-        :param sector_name: Name of the sector.
-        :param subsector_name: Name of the subsector.
-        :return: DataFrame containing useful energy calculations for the region.
+        :return: DataFrame containing useful energy calculations for the sebusector's technology.
         """
         # Ensure forecast_year_range is in string format
+        ddets_dfs = []
+        variable_names = []
+        variable_names.append(ecu.name)
+        for ddet in ddets:
+            df = ddet.forecast
+            ddet_name = ddet.name
+            ddets_dfs.append(df)
+            variable_names.append(ddet_name)
         forecast_year_range = [str(year) for year in forecast_year_range]
-        region_group_df.columns = region_group_df.columns.map(str)
+        ue_per_technology_for_all_regions = [] #this is beacuse of the structure
+        for region in active_regions:
+            # Check if the region is already initialized in region_ue_list
+            if region not in region_ue_dict: #holds the objects that collect the ue per region for all sectors
+                region_ue_dict[region] = UsefulenergyRegion(name=region)
+            region_ue = region_ue_dict[region]
+            # Extract ECU row
+            ecu_row = ecu.forecast[ecu.forecast["Region"] == region]
+            ecu_row.columns = ecu_row.columns.map(str)
+            ecu_values = ecu_row[forecast_year_range]
+            list_ddets_for_region = [df[df["Region"]  == region ] for df in ddets_dfs]
+            #separate with type and without
+            dfs_with_type = [df[df["Type"] != "default"] for df in list_ddets_for_region]
+            dfs_without_type = [df[df["Type"] == "default"] for df in list_ddets_for_region]
+            dfs_without_type= [df for df in dfs_without_type if not df.empty]
+            dfs_with_type = [df for df in dfs_with_type if not df.empty]
+            # Initialize the common multiplier
+            common_multiplier = pd.Series(1, index=forecast_year_range)
+            # Compute the common multiplier from default rows and ECU values
+            for variable in dfs_without_type + [ecu_values]:
+                if variable is None or variable.empty: #fot the cases if we dont have DDEt without type for example in cts
+                    continue
+                variable.columns = variable.columns.map(str)
+                common_multiplier *= variable[forecast_year_range].iloc[0]
+            # Process rows with specific Types
+            combined_with_type = pd.concat(dfs_with_type, ignore_index=True)
+            grouped_by_type = combined_with_type.groupby("Type")  # Group by 'Type'
+            aggregated_results = pd.Series(0, index=forecast_year_range) # (aggregated by types)
+            ue_types = [] # this is ue for the region per types for 1 technology for 1 subsector for 1 sector
+            type_names = []
+            for type_name, group in grouped_by_type:
+                type_names.append(type_name)
+                group.columns = group.columns.map(str)
+                # Compute the product of year columns within the group
+                group_product = group[forecast_year_range].prod(axis=0)
+                # Multiply with the common multiplier
+                results_ue_type = group_product * common_multiplier #pd.series type
+                # Add the results_ue_type to the aggregated total per types thus we get per technology
+                aggregated_results += results_ue_type
+                # Create a result row
+                result_row = {"Region": region,
+                              "Sector": sector_name,
+                              "Subsector": subsector_name,
+                              "Technology": technology_name,
+                              "Type": type_name,
+                              "Variables": variable_names}
+                result_row.update(results_ue_type.to_dict())
+                ue_types.append(result_row)
+            # Combine results into a DataFrame
+            ue_results_per_types = pd.DataFrame(ue_types)
+            # here we collect the ue for the region for all sectors
+            region_ue.energy_ue.append(ue_results_per_types)
+            ue_per_technology_for_all_regions.append(ue_results_per_types)
+            # Add the results_ue_type to the aggregated total per types thus we get per technology #TODO
+            # aggregated_row = {
+            #     "Region": region,
+            #     "Sector": sector_name,
+            #     "Subsector": subsector_name,
+            #     "Technology": technology_name,
+            #     "Type": type_names,
+            #     "Variables": f"Aggregated per type {variable_names}"
+            # }
+            # aggregated_row.update(aggregated_results.to_dict())
 
-        # Extract ECU row
-        ecu_row = region_group_df[region_group_df["Variable"] == ecu_name]
-        if ecu_row.empty:
-            print(f"No ECU row found for region: {region}")
-            return pd.DataFrame()
 
-        # Extract ECU values
-        try:
-            ecu_values = ecu_row.iloc[0][forecast_year_range].values
-        except KeyError as e:
-            print(f"Error accessing forecast year columns: {e}")
-            return pd.DataFrame()
-        # Remove ECU row from the main DataFrame to avoid inclusion in Technology processing
-        region_group_df = region_group_df[region_group_df["Variable"] != ecu_name]
-        # Filter by Technology
-        results = []
-        for technology in region_group_df["Technology"].dropna().unique():
-            filtered_df_ddet = region_group_df[region_group_df["Technology"] == technology]
+        return  pd.concat(ue_per_technology_for_all_regions, ignore_index=True)
 
-            # Compute DDet product for the filtered DataFrame
-            ddet_product_df = self.compute_Ddet_product(filtered_df_ddet, ddet_names,forecast_year_range, ecu_name)
-
-            # Multiply ECU values with the DDet product for each year
-            for i, year in enumerate(forecast_year_range):
-                ddet_product_df[year] *= ecu_values[i]
-
-            # Append to results
-            results.append(ddet_product_df)
-
-        return pd.concat(results, ignore_index=True) if results else pd.DataFrame()
-
-    def compute_Ddet_product(self, filtered_df_Ddet, ddet_names, forecast_year_range,ecu_name):
+    def write_sector_predictions_to_excel(self):
         """
-        Compute the product of DDet values for the given forecast years, considering rows with and without Type.
-
-        Parameters:
-            filtered_df_Ddet (DataFrame): Filtered DataFrame for a specific Technology.
-            ddet_names (list): List of DDet variable names to consider for multiplication.
-            forecast_year_range (list): List of forecast years.
-
-        Returns:
-            DataFrame: DataFrame containing updated forecast values for each combination, grouped by Type.
+        Write predictions to separate Excel files for each sector,
+        concatenating all forecast data into a single table per sector.
         """
-        ddet_product = []
-        # Filter rows corresponding to DDet variables
-        ddet_rows = filtered_df_Ddet[filtered_df_Ddet["Variable"].isin(ddet_names)]
-        if ddet_rows.empty:
-            print("No DDet data found.")
-            return pd.DataFrame(columns=filtered_df_Ddet.columns)  # Return empty DataFrame if no valid rows
+        output_path = self.input_manager.output_path
+        os.makedirs(output_path, exist_ok=True)  # Ensure the output directory exists
 
-        # Separate rows with and without Type
-        ddet_with_type = ddet_rows[ddet_rows["Type"].notna()]
-        ddet_without_type = ddet_rows[ddet_rows["Type"].isna() | (ddet_rows["Type"] == "")]  # Include empty strings
+        for sector in self.predictions:
+            # Construct the file path for the sector
+            sector_file_path = os.path.join(output_path, f"ue_{sector.name}.xlsx")
+            # Access the sector.energy_UE DataFrame
+            if hasattr(sector, "energy_UE") and isinstance(sector.energy_UE, pd.DataFrame):
+                with pd.ExcelWriter(sector_file_path, engine="xlsxwriter") as writer:
+                    sector.energy_UE.to_excel(writer, sheet_name="Energy_UE", index=False)
+                print(f"Predictions of useful energy for sector '{sector.name}' written to {sector_file_path}")
+            else:
+                print(f"Skipping sector '{sector.name}' - 'energy_UE' is not a valid DataFrame or missing.")
 
-
-        # Start with rows without a Type (common multiplier for all Types)
-        common_multiplier = pd.Series(1.0, index=forecast_year_range)
-        for _, row in ddet_without_type.iterrows():
-            common_multiplier *= row[forecast_year_range]
-
-        # Iterate over each unique Type
-        unique_types = ddet_with_type["Type"].unique()
-        for type_value in unique_types:
-            # Filter rows for the current Type
-            type_filtered_rows = ddet_with_type[ddet_with_type["Type"] == type_value]
-
-            # Start with the product of rows for the current Type
-            base_product = pd.Series(1.0, index=forecast_year_range)
-
-            for _, row in type_filtered_rows.iterrows():
-                base_product *= row[forecast_year_range]
-
-            # Multiply the common multiplier into the base product
-            base_product *= common_multiplier
-
-            # Prepare the row for the product of rows with this Type
-            result_row = type_filtered_rows.iloc[0].copy()  # Use metadata from the first row of the current Type
-            result_row[forecast_year_range] = base_product
-            result_row["Variables"] = f"Product({ddet_names + [ecu_name]})"  # name of the Variables which are multipled
-            ddet_product.append(result_row)
-
-        # Convert the result into a DataFrame
-        if ddet_product:
-            return pd.DataFrame(ddet_product)
-        else:
-            return pd.DataFrame(columns=filtered_df_Ddet.columns)
-
-    def _extract_ecu_ddet_and_tech(self, settings, subsector_name):
+    def export_region_data(self, region_ue_dict, output_folder="region_ue"):
         """
-        Extract ECU, DDet variable names, and Technology for the specified subsector from the settings table.
+        Export the useful energy data for all regions to Excel after all calculations are complete.
 
-        :param settings: Settings DataFrame.
-        :param subsector_name: Name of the subsector to filter settings.
-        :return: Tuple of ECU name, list of DDet names, and list of technologies (if applicable).
+        :param region_ue_dict: Dictionary containing UsefulenergyRegion objects keyed by region name.
+        :param output_folder: Folder where the Excel files should be saved (relative to input_manager.output_path).
         """
-        # Filter the settings table for the specified subsector
-        filtered_row = settings[settings["Subsector"] == subsector_name]
-        if filtered_row.empty:
-            print(f"No settings found for subsector: {subsector_name}")
-            return None, [], []
-
-        # Extract ECU
-        ecu_name = filtered_row["ECU"].iloc[0] if "ECU" in filtered_row.columns else None
-
-        # Extract DDet variables
-        ddet_columns = [col for col in filtered_row.columns if col.startswith("DDet")]
-        ddet_names = [filtered_row[col].iloc[0] for col in ddet_columns if not pd.isna(filtered_row[col].iloc[0])]
-
-        # Extract Technology
-        technologies = (
-            filtered_row["Technology"].iloc[0].split(",") if "Technology" in filtered_row.columns and not pd.isna(
-                filtered_row["Technology"].iloc[0]) else []
-        )
-
-        return ecu_name, ddet_names, technologies
-
-    def normalize_df(self, subsector_df, ddet_names):
-        """
-        Splits the Variable column in the DataFrame into two separate columns: Variable and Type.
-        :param subsector_df: Input DataFrame containing the Variable column.
-        :param ddet_names: List of base variable names to match against the Variable column.
-        :return: Transformed DataFrame with Variable and Type columns.
-        """
-
-        # Function to extract base variable and type
-        def extract_variable_and_type(var_name):
-            """
-            Extracts the base variable and the remaining part (type).
-            If the remaining part (type) is empty, it will be replaced with None.
-            :param var_name: The variable name string to process.
-            :return: Tuple of (base_key, type_part) or (var_name, None) if no match.
-            """
-            # Match the base variable name from the defined keys
-            for base_key in ddet_names:
-                if base_key in var_name:
-                    # Extract the base variable and the remaining part as the type
-                    type_part = var_name.replace(base_key, "").strip()
-                    # Replace empty type_part with None
-                    type_part = type_part if type_part else None
-                    return base_key, type_part
-            # If no match, return the full name as Variable and Type as None
-            return var_name, None
-
-        # Apply the extraction function to the Variable column
-        subsector_df[["Variable", "Type"]] = subsector_df["Variable"].apply(
-            lambda x: pd.Series(extract_variable_and_type(x))
-        )
-        return subsector_df
+        # Use the output path from InputManager and append the output_folder
+        full_output_path = self.input_manager.output_path / output_folder
+        # Ensure the full output folder exists
+        os.makedirs(full_output_path, exist_ok=True)
+        # Export each region's data
+        for region_name, region_ue in region_ue_dict.items():
+            region_ue.export_to_excel(full_output_path)
 
 
-# class UsefulEnergyAggregator:
-#     def _init_(self,UsefulEnergyCalculator):
-#          sectors_ue = UsefulEnergyCalculator.all_sectors_UE
-#
-#     def aggregatre_by_region_for_technology(self):
-#         pass
+

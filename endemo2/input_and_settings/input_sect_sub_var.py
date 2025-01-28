@@ -1,4 +1,5 @@
 import pandas as pd
+import os
 
 
 class Region:
@@ -31,6 +32,24 @@ class Variable:
     def __init__(self, name):
         self.name = name
         self.region_data = []
+        self.forecast = None
+
+    def consolidate_forecast(self):
+        """
+        Combine the forecast DataFrames from all regions into a single DataFrame.
+        """
+        forecasts = []
+        for region_data in self.region_data:
+            if region_data.forecast is not None:
+                # Add region_name as a column to each forecast DataFrame
+                forecast_with_metadata = region_data.forecast.copy()
+                forecasts.append(forecast_with_metadata)
+
+        if forecasts:
+            # Combine all regional forecasts into a single DataFrame
+            self.forecast = pd.concat(forecasts, ignore_index=True)
+        else:
+            self.forecast = pd.DataFrame()
 
     def __str__(self):
         regions_str = "\n".join(f"    {str(region)}" for region in self.region_data)
@@ -42,7 +61,7 @@ class Subsector:
         self.name = name
         self.ecu = None  #  ECU object
         self.technologies = []  # List of Technology objects which will contain DDet variables
-        self.energy_UE = [] # List of energy_UE objects for Subsector
+        self.energy_UE = None
 
     def __str__(self):
         technologies_str = "\n".join(f"    {str(tech)}" for tech in self.technologies)
@@ -50,23 +69,22 @@ class Subsector:
             f"Subsector: {self.name}\n"
             f"  ECU: {self.ecu}\n"
             f"  Technologies:\n{technologies_str if technologies_str else '    No technologies'}\n"
-            f"  Energy UE: {len(self.energy_UE)} entries"
+        #    f"  Energy UE: {len(self.energy_UE)} entries"
         )
 
 class Technology:
     def __init__(self, name):
         self.name = name
         self.ddets = []  # List of Variable objects
-        self.energy_UE =[] # List of energy_UE objects for Technology
+        self.energy_UE = None
 
     def __str__(self):
         ddets_str = "\n".join(f"      {str(ddet)}" for ddet in self.ddets)
         return (
             f"Technology: {self.name}\n"
             f"  DDets:\n{ddets_str if ddets_str else '    No DDet variables'}\n"
-            f"  Energy UE: {len(self.energy_UE)} entries"
+      #      f"  Energy UE: {len(self.energy_UE)} entries"
         )
-
 
 class Sector:
     """
@@ -88,13 +106,46 @@ class Sector:
             f"Sector: {self.name}\n"
             f"  Settings: {len(self.sector_settings) if self.sector_settings is not None else 0} rows\n"
             f"  Subsectors:\n{subsectors_str if subsectors_str else '    No subsectors'}\n"
-            f"  Energy UE: {'Available' if self.energy_UE else 'None'}"
+         #   f"  Energy UE: {'Available' if self.energy_UE else 'None'}"
         )
 
     @classmethod
     def get_by_name(cls, name):
         """Retrieve a Sector object by its name."""
         return cls._registry.get(name)
+
+
+class UsefulenergyRegion:
+    """
+    Represents useful energy data for a specific region, organized hierarchically by sector, subsector, technology, and type.
+    """
+
+    def __init__(self, name):
+        """
+        Initialize the UsefulenergyRegion object.
+
+        Args:
+            name (str): The name of the region.
+        """
+        self.name = name  # Name of the region
+        self.energy_ue = []  # Hierarchical data structure: sector → subsector → technology → type
+
+    def export_to_excel(self, output_folder):
+        """
+        Concatenate the list of DataFrames into a single DataFrame and export it to an Excel file.
+        Args:
+            output_folder (str): The folder path where the Excel file will be saved.
+        """
+        if not self.energy_ue:
+            print(f"No data to export for {self.name}.")
+            return
+        # Concatenate all DataFrames in the list
+        concatenated_df = pd.concat(self.energy_ue, ignore_index=True)
+        # Define the output file name within the specified folder
+        file_name = os.path.join(output_folder, f"{self.name}_ue.xlsx")
+        # Export the concatenated DataFrame to Excel
+        concatenated_df.to_excel(file_name, index=False)
+        print(f"Saved concatenated DataFrame to {file_name}")
 
 
 class DemandDriver:

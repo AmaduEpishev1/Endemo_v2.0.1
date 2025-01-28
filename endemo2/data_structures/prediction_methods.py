@@ -7,11 +7,8 @@ from typing import List, Tuple, Union
 
 import warnings
 from typing import Any, Union
-
 import statistics as st
-
 import numpy as np
-from pkg_resources import non_empty_lines
 
 from endemo2.data_structures.containers import Interval, Datapoint
 from endemo2.data_structures.enumerations import ForecastMethod
@@ -20,13 +17,16 @@ from endemo2 import utility as uty
 
 class Method:
     def __init__(self):
-        self._name = None  # Method used for forecasting
+        self.name = None  # Method used for forecasting
         self.equation = None  # Holds the regression equation
         self.coefficients: List[float] = []  # Coefficients first element is k0
-        self.row_identifier = None  # Identifier for the specific row
+        self.type_identifier = None  # Identifier for the specific row
         self.interp_points = None # A list of known data points (tuples), where each entry is a tuple of coordinates and the function value at that point.
         self.demand_drivers_names = None # list of DDr names used in the method
-    def save_coef(self, coefficients: List[float], equation: str, row_identifier: str = None):
+        self.factor = None # multiplicator to get the standard units
+        self.lower_limit = None # Lower boundary for the processing variable
+
+    def save_coef(self, coefficients: List[float], equation: str, type_identifier: str = None):
         """
         Save coefficients and the regression equation to the Method object.
 
@@ -38,146 +38,13 @@ class Method:
         self.coefficients = coefficients
         self.equation = equation
         # Optionally track the row identifier
-        if row_identifier is not None:
-            self.row_identifier = row_identifier
+        if type_identifier is not None:
+            self.type_identifier = type_identifier
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    def get_log_y(self, target_x) -> Union[float, None]:
-        """
-        Returns the y-axis value of the function at the given x according to the logarithmic method.
-
-        :param target_x: The x_axis value the function should be applied on.
-        :return: The according y-axis value if the logarithmic coefficients are set, otherwise None.
-        """
-        if self._log is not None:
-            return uty.log_prediction(self._log, target_x)
-        else:
-            return None
-
-    def get_lin_y(self, target_x) -> Union[float, None]:
-        """
-        Returns the y-axis value of the function at the given x according to the linear method.
-
-        :param target_x: The x_axis value the function should be applied on.
-        :return: The according y-axis value if the linear coefficients are set, otherwise None.
-        """
-        if self._lin is not None:
-            return uty.lin_prediction(self._lin, target_x)
-        else:
-            return None
-
-    def get_quadr_y(self, target_x) -> Union[float, None]:
-        """
-        Returns the y-axis value of the function at the given x according to the quadratic method.
-
-        :param target_x: The x_axis value the function should be applied on.
-        :return: The according y-axis value if the quadratic coefficients are set, otherwise None.
-        """
-        if self._quadr is not None:
-            return uty.quadr_prediction(self._quadr, target_x)
-        else:
-            return None
-
-    def get_quadr_offset_y(self, target_x) -> Union[float, None]:
-        """
-        Returns the y-axis value of the function at the given x according to the quadratic offset method.
-
-        :param target_x: The x_axis value the function should be applied on.
-        :return: The according y-axis value if the quadratic coefficients and offset are set, otherwise None.
-        """
-        if self._offset is not None and self._quadr is not None:
-            quadr_offset = (self._quadr[0] + self._offset, self._quadr[1], self._quadr[2])
-            return uty.quadr_prediction(quadr_offset, target_x)
-        else:
-            return None
-
-    def get_function_y(self, target_x) -> Union[float, None]:
-        """
-        Returns the y-axis value of the function at the given x according to the used method.
-
-        :param target_x: The x_axis value the function should be applied on.
-        :return: The according y-axis value if everything of the chosen method (and the method) is set, otherwise None.
-        """
-        match self._method:
-            case ForecastMethod.LIN:
-                return self.get_lin_y(target_x)
-            case ForecastMethod.QUADR:
-                return self.get_quadr_y(target_x)
-            case ForecastMethod.EXP:
-                return self.get_exp_y(target_x)
-            case ForecastMethod.QUADRATIC_OFFSET:
-                return self.get_quadr_offset_y(target_x)
-            case ForecastMethod.LOG:
-                return self.get_log_y(target_x)
-            case None:
-                warnings.warn("No forecast method selected for coefficients.")
-                return None
-
-    def get_log(self) -> (float, float):
-        """
-        Getter for the logarithmic coefficient.
-
-        :return: The logarithmic coefficient of form (k0, k1).
-        """
-        return self._log
-
-    def get_lin(self) -> (float, float):
-        """
-        Getter for the linear coefficient.
-
-        :return: The linear coefficient of form (k0, k1).
-        """
-        return self._lin
-
-    def get_quadr(self) -> (float, float, float):
-        """
-        Getter for the quadratic coefficient.
-
-        :return: The quadratic coefficient of form (k0, k1, k2).
-        """
-        return self._quadr
-
-    def get_exp(self) -> (Datapoint, float):
-        """
-        Getter for the exponential coefficient.
-
-        :return: The exponential execution variables of form ((start_x, start_y), growth_rate)
-        """
-        return self._exp
-
-    def get_offset(self) -> float:
-        """
-        Getter for the additional offset.
-
-        :return: The additional offset
-        """
-        return self._offset
+    def __str__(self):
+        return (
+            f"row identifier: {self.type_identifier}\n"
+        )
 
 
 class RigidTimeseries:

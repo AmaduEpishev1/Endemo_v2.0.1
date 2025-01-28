@@ -3,10 +3,6 @@ from endemo2.input_and_settings.input_loader import  initialize_hierarchy_input_
 from endemo2.model_instance.model_forecast import Forecast
 from endemo2.model_instance.model_useful_energy import UsefulEnergyCalculator
 
-import pandas as pd
-import os
-from pathlib import Path
-
 class Endemo:
     """
     This is the whole program. From here we control what the model does on the highest level.
@@ -21,7 +17,6 @@ class Endemo:
         self.input_manager = None
         self.input = None
         self.forecast = None
-        self.demand_driver = None  # Holds the DemandDriver instance
         self.output_manager = None  # Delay OutputManager initialization until InputManager is ready
 
     def execute_with_preprocessing(self):
@@ -45,25 +40,13 @@ class Endemo:
         print("Predictions successfully done")
 
 
-        # # Calculate useful energy
-        # print("Calculate useful energy ...")
-        # useful_energy = UsefulEnergyCalculator(self.input_manager, instance_filter.sectors_predictions)
-        # print("Calculate useful energy successfully done...")
+        #Calculate useful energy
+        print("Calculate useful energy ...")
+        useful_energy = UsefulEnergyCalculator(self.input_manager, self.input)
+        print("Calculate useful energy successfully done...")
 
-
-        # create model instance
-        # self.create_instance()
-
-        # # generate output files
+        # # generate output files #TODO move the outputs to the separate script
         # self.write_all_output()
-
-
-    def update_settings(self):
-        """ Rereads the instance settings. """
-        # read input_and_settings, TODO: separate the instance settings from pre-run settings
-        print("Updating settings for new scenario...")
-        self.input_manager.update_set_and_control_parameters()
-        print("Settings were successfully updated.")
 
 
 

@@ -1,7 +1,6 @@
 import pandas as pd
 from endemo2.input_and_settings.input_sect_sub_var import Sector,Subsector,Variable,Region,Technology,DemandDriver
 
-
 def initialize_hierarchy_input_from_settings_data(input_manager):
     """
        Initialize hierarchy input using settings data for active sectors.
@@ -18,7 +17,6 @@ def initialize_hierarchy_input_from_settings_data(input_manager):
     ue_type_list = input_manager.general_settings.UE_settings.loc[
         input_manager.general_settings.UE_settings['Parameter'] == "Useful energy types for calculation", 'Value'
     ].iloc[0].split(",")
-
     ue_type_list = [v.strip() for v in ue_type_list]
     sectors = [] # list of sector instances
     #intilize the Ddr data object
@@ -54,8 +52,8 @@ def initialize_hierarchy_input_from_settings_data(input_manager):
             ddet_values = list(ddet_columns.values())
             subsector_variables = [ecu_name] + ddet_values # the first element always ecu
             for index, variable_name in enumerate(subsector_variables):
-                variable = Variable(name=variable_name)
                 if index == 0:  # ECU Variable
+                    variable = Variable(name=variable_name)
                     # Populate ECU regions
                     populate_variable(variable =variable,
                                                hist_data = hist_data,
@@ -65,6 +63,17 @@ def initialize_hierarchy_input_from_settings_data(input_manager):
                     subsector.ecu = variable
                 else:  # DDet Variables
                     for tech_name in technology_names:
+                        variable = Variable(name=variable_name)
+
+                        # Check if there is any data for the current variable and technology
+                        variable_user_df = user_set_data[
+                            (user_set_data["Variable"] == variable.name) &
+                            (user_set_data["Subsector"] == subsector_name) &
+                            (user_set_data["Region"].isin(active_regions)) &
+                            (user_set_data["Technology"] == tech_name)
+                            ]
+                        if variable_user_df.empty:  # Skip if there is no data for this technology
+                            continue
                         # Get or create Technology
                         technology = next(
                             (tech for tech in subsector.technologies if tech.name == tech_name),
@@ -72,6 +81,7 @@ def initialize_hierarchy_input_from_settings_data(input_manager):
                         if not technology:
                             technology = Technology(name=tech_name)
                             subsector.technologies.append(technology)
+
                         # Populate variable for the specific technology
                         populate_variable(variable = variable,
                                                   hist_data = hist_data,
@@ -82,7 +92,7 @@ def initialize_hierarchy_input_from_settings_data(input_manager):
                         technology.ddets.append(variable)
                 # Add Subsector to Sector
             sector.subsectors.append(subsector)
-            print(sector)
+            #print(sector)
         sectors.append(sector)
         excel_cache.clear_cache()
     demand_driver.read_all_demand_drivers(input_manager)
@@ -98,9 +108,6 @@ def populate_variable(variable, hist_data, user_set_data, active_regions,subsect
         user_set_data (pd.DataFrame): User-set data for the sector.
         active_regions (list): List of active regions.
         tech_name (str, optional): Filter by technology name. Defaults to None.
-
-    Returns:
-        None
     """
     # Filter user-set data by variable name, active regions, and (optionally) technology
     variable_user_df = user_set_data[(user_set_data["Variable"] == variable.name) & (user_set_data["Subsector"] == subsector_name) &
@@ -115,78 +122,78 @@ def populate_variable(variable, hist_data, user_set_data, active_regions,subsect
     regions = load_regions_data_for_variable (variable_user_df = variable_user_df,
                                               variable_hist_df = variable_hist_df,
                                               active_regions = active_regions)
+    variable.region_data = []  # Reset before adding new data
     for region in regions:
         variable.region_data.append(region)
 
-def load_regions_data_for_variable(variable_user_df, variable_hist_df,active_regions):
+def load_regions_data_for_variable(variable_user_df, variable_hist_df, active_regions):
     """
     Load region-specific data for a variable based on user-set and historical data.
 
     Args:
         variable_user_df (pd.DataFrame): Filtered user-set data.
         variable_hist_df (pd.DataFrame): Filtered historical data.
-
+        active_regions (list): List of active regions to process.
     Returns:
         list: List of Region objects populated with relevant data.
     """
-    settings_columns = (
-            [col for col in ["Region","Type", "Temp_level", "Unit", "Factor", "Function", "Equation", "Forecast data"]
-             if col in variable_user_df.columns] +
-            [col for col in variable_user_df.columns if str(col).startswith("DDr")]
-    )
-    iteration_columns = ["Type"] # Drive could be added or any other #TODO to ask Andelka what to do with the new columns if they appear
+    settings_columns = [
+                           col for col in
+                           ["Region", "Type", "Temp_level", "Unit", "Factor", "Function", "Equation", "Forecast data", "Lower limit"]
+                           if col in variable_user_df.columns
+                       ] + [col for col in variable_user_df.columns if str(col).startswith("DDr")]
+
+    iteration_columns = ["Type"]
     regions = []
-    variable_set_df = variable_user_df[settings_columns]
-    # Cache default rows
-    default_set_rows = variable_set_df[variable_set_df["Region"] == "default"]
+
+    # Filter default rows
+    default_set_rows = variable_user_df[variable_user_df["Region"] == "default"]
     default_hist_rows = variable_hist_df[variable_hist_df["Region"] == "default"]
-    default_user_rows = variable_user_df[variable_user_df["Region"] == "default"]
+    variable_set_df = variable_user_df[settings_columns]
+
     for region_name in active_regions:
-        region = Region(region_name = region_name) #intiilization of the region object
+        region = Region(region_name=region_name)  # Initialize Region object
         # Get region-specific settings
-        region_set_row = get_region_data(variable_set_df, region_name, default_set_rows)
-        region.settings = region_set_row  # will contain a df that includes settings_columns and also other types
-        df_hist = []
-        df_user = []
-        if any(col in region_set_row.columns for col in iteration_columns): #TODO itteration makes the duplicates  to double check
-            for index, row in region_set_row.iterrows():
-                value = row.get("Type") #values_series
-                forecast_data = row.get("Forecast data") # here is get as itterows converted this into series
-                if forecast_data == "Historical":
-                    # Load historical data
-                    region_data_df = get_region_data(variable_hist_df, region_name, default_hist_rows, value)
-                   # years_hist_col = [col for col in region_data_df.columns if str(col).isdigit()] + ['Type'] #TODO it would be much better if we could filter datat here and have pure datat in the objects
-                   # region_data_df = region_data_df[years_hist_col]
-                    df_hist.append(region_data_df)
-                else:
-                    # Load user-set data
-                    region_data_df = get_region_data(variable_user_df, region_name, default_user_rows, value)
-                   # user_columns = [col for col in region_data_df.columns if col not in settings_columns] + ['Type']
-                   # region_data_df = region_data_df[user_columns]
-                    df_user.append(region_data_df)
-                # Concatenate dataframes, or set to None if no data
-            hist_df = pd.concat(df_hist, ignore_index=True) if df_hist else None
-            region.historical = hist_df.drop_duplicates() if hist_df is not None else None #TODO this seems to be not right but it works
-            user_df = pd.concat(df_user, ignore_index=True) if df_user else None
-            region.user = user_df.drop_duplicates() if user_df is not None else None
-            regions.append(region)
+        region_set_df = get_region_data(variable_set_df, region_name, default_set_rows)
+        region.settings = region_set_df  # Save settings for the region
+
+        if any(col in region_set_df.columns for col in iteration_columns):
+            # Process all "Type"-specific settings in one operation
+            forecast_data_types = region_set_df[["Type", "Forecast data"]]
+            # Separate historical and user-set data for all types
+            historical_rows = forecast_data_types[forecast_data_types["Forecast data"] == "Historical"]
+            user_rows = forecast_data_types[forecast_data_types["Forecast data"] != "Historical"]
+
+            if not historical_rows.empty:
+                hist_data = get_region_data(
+                    variable_hist_df, region_name, default_hist_rows
+                )[variable_hist_df["Type"].isin(historical_rows["Type"])]
+                region.historical = clean_dataframe(hist_data) #TODO remove double cleaning
+
+            if not user_rows.empty:
+                user_data = get_region_data(
+                    variable_user_df, region_name, default_set_rows
+                )[variable_user_df["Type"].isin(user_rows["Type"])]
+                region.user = clean_dataframe(user_data) #TODO remove double cleaning
+
         else:
+            # Handle cases without iteration columns
             forecast_data = region.settings["Forecast data"].iloc[0]
             if forecast_data == "Historical":
-                # Load historical data
-                region_data_df = get_region_data(variable_hist_df, region_name, default_hist_rows)
-                #years_hist_col = [col for col in region_data_df.columns if str(col).isdigit()]
-               # region_data_df = region_data_df[years_hist_col]
-                region.historical = region_data_df.drop_duplicates()
+                hist_data = get_region_data(variable_hist_df, region_name, default_hist_rows)
+                region.historical = clean_dataframe(hist_data) #TODO remove double cleaning
             else:
-                # Load user-set data
-                region_data_df = get_region_data(variable_user_df, region_name, default_user_rows)
-                #user_columns = [col for col in region_data_df.columns if col not in settings_columns] + ["Type"]
-                #region.user = region_data_df[user_columns]
-                region.user = region_data_df.drop_duplicates()
-        regions.append(region)
+                user_data = get_region_data(variable_user_df, region_name, default_set_rows)
+                region.user = clean_dataframe(user_data) #TODO remove double cleaning
+
+        # Add the region to the list if it has relevant data
+        if (region.user is not None and not region.user.empty) or (
+                region.historical is not None and not region.historical.empty
+        ):
+            regions.append(region)
 
     return regions
+
 
 def get_region_data(df, region_name, default_df, value=None):
     """
@@ -201,23 +208,24 @@ def get_region_data(df, region_name, default_df, value=None):
         pd.DataFrame: Cleaned DataFrame with region-specific or default data.
     """
     # Initialize an empty list to collect output rows
-    if value == "HEAT": # TODO  this looks wrong
-        result_df = []
-        region_rows = df[(df["Region"] == region_name) & (df["Type"] == value)]
-        default_rows = default_df[default_df["Type"] == value]
-        for temp_level in default_rows["Temp_level"].unique():
-            # Check if this Temp_level exists in the region_rows
-            if temp_level not in region_rows["Temp_level"].values:
-                # Append the default row for this missing Temp_level
-                missing_row = default_rows[default_rows["Temp_level"] == temp_level]
-                result_df.append(missing_row)
-            elif temp_level in region_rows["Temp_level"].values:
-                region_row = region_rows[region_rows["Temp_level"] == temp_level]
-                result_df.append(region_row)
-            else:
-                return clean_dataframe(region_rows)
-        result_df = pd.concat(result_df, ignore_index=True)
-        return clean_dataframe(result_df)
+    if value == "HEAT":
+        if df["Temp_level"].notna().any() :
+            result_df = []
+            region_rows = df[(df["Region"] == region_name) & (df["Type"] == value)]
+            default_rows = default_df[default_df["Type"] == value]
+            for temp_level in default_rows["Temp_level"].unique():
+                # Check if this Temp_level exists in the region_rows
+                if temp_level not in region_rows["Temp_level"].values:
+                    # Append the default row for this missing Temp_level
+                    missing_row = default_rows[default_rows["Temp_level"] == temp_level]
+                    result_df.append(missing_row)
+                elif temp_level in region_rows["Temp_level"].values:
+                    region_row = region_rows[region_rows["Temp_level"] == temp_level]
+                    result_df.append(region_row)
+                else:
+                    return clean_dataframe(region_rows)
+            result_df = pd.concat(result_df, ignore_index=True)
+            return clean_dataframe(result_df)
     if value is not None:
         region_row = df[(df["Region"] == region_name) & (df["Type"] == value)]
     else:
@@ -228,12 +236,7 @@ def get_region_data(df, region_name, default_df, value=None):
         else:
             region_row = default_df
 
-    return clean_dataframe(region_row)
-
-def skip_years_in_df(df: pd.DataFrame, skip_years: [int]):
-    for skip_year in skip_years:
-        if skip_year in df.columns:
-            df.drop(skip_year, axis=1, inplace=True)
+    return clean_dataframe(region_row.drop_duplicates())
 
 def clean_dataframe(df):
     if df is None:
@@ -301,3 +304,5 @@ class ExcelFileCache:
         Clear the file cache to free up memory.
         """
         self.cache.clear()
+
+

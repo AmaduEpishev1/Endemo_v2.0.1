@@ -28,7 +28,7 @@ forecast_methods_map = {
         "generate_coef": cg.generate_linear_coefficients_multivariable_sklearn,
         "min_points": 2,
         "save_coef": pm.Method.save_coef,
-        "predict_function": ff._predict_lin,
+        "predict_function": ff.predict_lin,
         "get_eqaution_user": "y = k0 + k1*x1+k2*x2+…"
     },
     ForecastMethod.LOG: {
@@ -47,14 +47,14 @@ forecast_methods_map = {
         "generate_coef": cg.generate_constant_last_coefficient_,
         "min_points": 1,
         "save_coef": pm.Method.save_coef,
-        "predict_function": ff._predict_constant_last,
+        "predict_function": ff.predict_constant_last,
         "get_eqaution_user": "y = ...."
     },
     ForecastMethod.CONST_MEAN: {
         "generate_coef": cg.generate_constant_mean_coefficient_,
         "min_points": 1,
         "save_coef": pm.Method.save_coef,
-        "predict_function": ff._predict_constant_mean,
+        "predict_function": ff.predict_constant_mean,
         "get_eqaution_user": "y = ...."
     },
     ForecastMethod.EXP: {
@@ -74,9 +74,16 @@ forecast_methods_map = {
         "generate_coef":"",
         "min_points":"",
         "save_coef": "",
-        "predict_function": ff.multivariable_interpolation,
+        "predict_function": ff.multivariable_lin_interpolation,
         "get_eqaution_user": "linear interpolation"
-    }
+    },
+    ForecastMethod.CONST: {
+        "generate_coef": cg.generate_constant_last_coefficient_,
+        "min_points": 1,
+        "save_coef": pm.Method.save_coef,
+        "predict_function": ff.predict_constant_last,
+        "get_eqaution_user": "y = ...."
+    },
 }
 
 

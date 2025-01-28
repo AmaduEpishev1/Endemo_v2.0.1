@@ -657,45 +657,6 @@ def find_interval_between_datapoints(datapoints: [Datapoint], target_y: float) -
 
     return interval
 
-def align_and_combine_data_with_ddr_data(
-        main: List[Datapoint],
-        *others: List[Datapoint],
-        demand_driver_types: List
-) -> List[Tuple[List[float], float]]:
-    result = []
-
-    # Create dictionaries for fast lookup for all other demand drivers
-    other_dicts = [{point.x: point.y for point in other} for other in others]
-
-    for point in main:
-        year = point.x
-        main_value = point.y
-
-        # Initialize an empty list for demand driver values
-        demand_values = []
-
-        # Index for tracking current position in other_dicts
-        other_idx = 0
-
-        # Iterate over the demand driver types in the specified order
-        for driver in demand_driver_types:
-            if driver == DemandDriver.TIME:
-                # Append the TIME value (year)
-                demand_values.append(year)
-            else:
-                # Get the corresponding value from other_dicts for non-TIME drivers
-                if other_idx < len(other_dicts):
-                    value = other_dicts[other_idx].get(year)
-                    if value is not None:
-                        demand_values.append(value)
-                    other_idx += 1  # Increment index only for non-TIME demand drivers
-
-        # Ensure all demand drivers have valid values (no None values)
-        if None not in demand_values:
-            result.append((demand_values, main_value))
-
-    return result
-
 
 
 

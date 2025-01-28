@@ -2,8 +2,9 @@
 This module contains the functions for forecast
 """
 import numpy as np
+from scipy.spatial import distance
 
-def _predict_constant_last(coef, x_values) -> float:
+def predict_constant_last(coef, x_values) -> float:
     """
     Predict using the last constant value method.
 
@@ -13,7 +14,7 @@ def _predict_constant_last(coef, x_values) -> float:
         raise ValueError("Constant prediction cannot be performed. Offset (constant value) is not set.")
     return coef.coefficients[0]
 
-def _predict_constant_mean(coef, x_values) -> float:
+def predict_constant_mean(coef, x_values) -> float:
     """
     Predict using the constant mean value method.
 
@@ -23,7 +24,7 @@ def _predict_constant_mean(coef, x_values) -> float:
         raise ValueError("Mean prediction cannot be performed. Offset (constant value) is not set.")
     return coef.coefficients[0]
 
-def _predict_lin(coef, x_values: list) -> float:
+def predict_lin(coef, x_values: list) -> float:
     """
     Perform prediction using the provided coefficients and independent variables.
 
@@ -50,11 +51,11 @@ def calculate_const_mult_div(coef,x_values: list) -> float:
     :return: The calculated result or raises an exception for invalid inputs.
     """
     if len(x_values) != 2:
-        raise ValueError("Values must be a list of exactly two elements: [X1, X2].")
+        raise ValueError("DDr must be a list of exactly two elements: [X1, X2]. const_mult_div")
     offset = coef.coefficients[0]  # Retrieve the intercept (`k0`)
     X1, X2 = x_values
     if X2 == 0:
-        raise ValueError("X2 cannot be zero to avoid division by zero.")
+        raise ValueError("DDr cannot be zero to avoid division by zero. const_mult_div")
 
     return offset * (X1 / X2)
 
@@ -67,16 +68,16 @@ def calculate_lin_mult_div(coef, x_values: list) -> float:
     :return: Calculated result.
     """
     if len(x_values) != 3:
-        raise ValueError("x_values must contain exactly three elements: [X1, X2, X3].")
+        raise ValueError("DDr must contain exactly three elements: [X1, X2, X3].lin_mult_div")
 
     X1, X2, X3 = map(float, x_values)  # Ensure all inputs are floats
 
     if X3 == 0:
-        raise ValueError("X3 cannot be zero to avoid division by zero.")
+        raise ValueError("X3 cannot be zero to avoid division by zero.lin_mult_div")
 
     coefficients = coef.coefficients  # Extract only k0 and k1
     if len(coefficients) != 2:
-        raise ValueError("LIN_MULT_DIV requires exactly two coefficients: k0 and k1.")
+        print("LIN_MULT_DIV requires exactly two coefficients: k0 and k1.")
 
     k0, k1 = coefficients
     return ((k0 + k1 * X1) * X2) / X3
@@ -90,12 +91,12 @@ def exp_mult_div(coef, x_values: list) -> float:
     :return: Calculated result.
     """
     if len(x_values) != 3:
-        raise ValueError("x_values must contain exactly three elements: [X1, X2, X3].")
+        raise ValueError("DDr must contain exactly three elements: [X1, X2, X3].exp_mult_div")
 
     X1, X2, X3 = map(float, x_values)  # Ensure all inputs are floats
 
     if X3 == 0:
-        raise ValueError("X3 cannot be zero to avoid division by zero.")
+        raise ValueError("X3 cannot be zero to avoid division by zero. exp_mult_div")
 
     coefficients = coef.coefficients  # Extract only k0, k1, k2, k3
     if len(coefficients) != 4:
@@ -131,49 +132,72 @@ def exponential_multivariable(coef, x_values: list) -> float:
     # Compute the final result
     return k0 + kn * np.exp(exponent)
 
-def multivariable_interpolation(point, points):
+def multivariable_lin_interpolation(points, point):
     """
-    Perform linear interpolation in n-dimensional space.
+        Perform n-dimensional linear interpolation. Inverse Distance Weighting
+        Parameters:
+            points: A list of tuples [(coord1, coord2, ..., value), ...]
+                    where coord1, coord2, ... are the coordinates, and value is the function value at that point.
+            point: A tuple of coordinates (x, y, z, ...) where interpolation is desired.
+
+        Returns:
+            Interpolated value at the given point.
+        """
+    # Extract coordinates and values
+    coords = np.array([p[:-1] for p in points])  # All coordinates (without values)
+    values = np.array([p[-1] for p in points])  # Corresponding values
+
+    # Ensure the point is within bounds
+    mins = coords.min(axis=0)
+    maxs = coords.max(axis=0)
+    if not np.all((mins <= point) & (point <= maxs)):
+        ValueError(f"Point {point} is out of bounds.")
+        return multivariable_lin_interpolation_ignore_bounds(points,point)
+
+    # Find the distances of all points to the target point
+    distances = np.linalg.norm(coords - np.array(point), axis=1)
+
+    # If the point matches exactly, return the value directly
+    if np.isclose(distances.min(), 0.0):
+        return values[np.argmin(distances)]
+
+    # Compute weights as the inverse of distance
+    weights = 1 / distances
+    weights /= weights.sum()  # Normalize weights
+
+    # Perform weighted sum of values
+    interpolated_value = np.sum(weights * values)
+
+    return interpolated_value
+
+
+def multivariable_lin_interpolation_ignore_bounds(points, point):
+    """
+    Perform n-dimensional linear interpolation using Inverse Distance Weighting (IDW),
+    ignoring bounds for extrapolation.
 
     Parameters:
-        point: A tuple of coordinates (x, y, z, ...) where interpolation is desired.
-        points: A list of tuples [(coord1, coord2, ..., value), ...]
-                where coord1, coord2, ... are the coordinates, and value is the function value at that point.
-
+        points: List of tuples [(coord1, coord2, ..., value), ...]
+        point: Tuple of coordinates (x, y, ...)
     Returns:
-        Interpolated value at the given point.
+        Interpolated value at the target point.
     """
-    n = len(point)  # Dimensionality of the input point
+    # Extract coordinates and values
+    coords = np.array([p[:-1] for p in points])  # All coordinates (without values)
+    values = np.array([p[-1] for p in points])  # Corresponding values
 
-    if len(points) == 1:
-        # Base case: Only one point, return its value
-        return points[0][-1]
+    # Calculate distances between target point and all known points
+    distances = np.linalg.norm(coords - np.array(point), axis=1)
+    # Handle exact match case
+    if np.isclose(distances.min(), 0.0):
+        return values[np.argmin(distances)]
 
-    # Group points by the first coordinate
-    grouped = {}
-    for p in points:
-        key = p[0]
-        grouped.setdefault(key, []).append(p[1:])
+    # Compute weights as the inverse of the distances
+    weights = 1 / distances
+    weights /= weights.sum()  # Normalize the weights
 
-    # Sort the keys and check bounds
-    keys = sorted(grouped.keys())
-    if not (keys[0] <= point[0] <= keys[-1]):
-        raise ValueError(f"Point {point} is out of bounds in dimension 0")
+    # Perform weighted sum of values
+    interpolated_value = np.sum(weights * values)
 
-    # Interpolate in the first dimension
-    lower_key = max(k for k in keys if k <= point[0])
-    upper_key = min(k for k in keys if k >= point[0])
-
-    if lower_key == upper_key:
-        # No need to interpolate, recurse in remaining dimensions
-        return multivariable_interpolation(point[1:], grouped[lower_key])
-
-    # Values at the lower and upper keys
-    lower_value = multivariable_interpolation(point[1:], grouped[lower_key])
-    upper_value = multivariable_interpolation(point[1:], grouped[upper_key])
-
-    # Linear interpolation in the current dimension
-    weight = (point[0] - lower_key) / (upper_key - lower_key)
-    return (1 - weight) * lower_value + weight * upper_value
-
+    return interpolated_value
 

@@ -17,10 +17,9 @@ def generate_constant_last_coefficient_(X : list, y: list):
 def generate_constant_mean_coefficient_(X : list, y: list):
     if not y:
         raise ValueError("y cannot be empty.")
-
     k0 = np.mean(y)
-    equation = "y = k0"
-    return k0, equation
+    equation = "y = k0(t_hist_mean)"
+    return [k0], equation
 
 
 def generate_linear_coefficients_multivariable_sklearn(X: list, y: list):
