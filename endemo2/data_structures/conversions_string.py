@@ -15,6 +15,7 @@ map_forecast_method_to_string = {
     ForecastMethod.EXP_MULT_DIV: "exp-mult-div",
     ForecastMethod.CONST_MULT_DIV: "const_mult_div",
     ForecastMethod.INTERP_LIN: "interp_lin",
+    ForecastMethod.MULT: "mult"
 }
 
 

@@ -19,6 +19,7 @@ class ForecastMethod(Enum):
     LIN_MULT_DIV = auto()
     EXP_MULT_DIV = auto()
     INTERP_LIN   = auto()
+    MULT = auto()
 
 class DemandDriver(Enum):
     """

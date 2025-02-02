@@ -160,12 +160,12 @@ class Forecast:
         :param region: obj.
         :return: Coefficient object.
         """
-        key_columns = ["Type","Temp_level","Subtech","Drive"]
+        key_columns = ["Type","Temp_level"]
         historical_data = region.historical
         settings = region.settings
         valid_keys = [col for col in key_columns if col in historical_data.columns and col in settings.columns]
         coefficients_list = []  # To store coef objects for all rows that we cna do the predictions
-        for index, row in historical_data.iterrows():
+        for index, row in historical_data.iterrows(): #TODO this is looks very wrong
             row = row.to_frame().T
             row.columns = row.columns.map(str)
             settings_row  = settings # in case when we have only 1 settings row
@@ -178,7 +178,7 @@ class Forecast:
                 # Drop duplicate columns (since `_x` and `_y` were merged into a single name)
                 merged_df = merged_df.loc[:, ~merged_df.columns.duplicated()]
                 settings_row = uty.clean_dataframe(merged_df) #TODO this contains now both hist nd settings so theoretically we can pass only this
-            if "Type" in settings_row.columns and "Temp_level" in settings_row.columns: #TODO this is looks very wrong
+            if "Type" in settings_row.columns and "Temp_level" in settings_row.columns:
                 # Both Type and Temp_level columns exist
                 type_identifier = (
                     f"{settings_row['Type'].iloc[0]}_{settings_row['Temp_level'].iloc[0]}"
@@ -209,23 +209,18 @@ class Forecast:
             # Set the non-year columns as index temporarily for mapping the DDr data
             row = row[year_columns] # only timeseries data for the row
             # Get filtered demand driver data
-            demand_driver_data = self._map_filtered_demand_driver_data(demand_drivers, year_columns_list, region.region_name)
+            demand_driver_data = self._map_filtered_demand_driver_data(demand_drivers, year_columns_list, region.region_name, #df mapped for historical data coef calculation
+                                                                   data_origin="historical")
             # Align historical data with demand driver years
             filtered_years = demand_driver_data.index.tolist()
-            common_years = sorted(set(filtered_years).intersection(year_columns_list))  # Find common years
+            common_years = sorted(set(filtered_years).intersection(filtered_years))  # Find common years
             if not common_years:
-                print(f"No common years between demand drivers and historical data for {region.region_name} with the set {settings_row}/"
-                      f"forecast method changed to the const_last")
-                forecast_method = ForecastMethod.CONST_LAST
-                last_year = str(year_columns_list[-1])
-                historical_values = [row[last_year].iloc[0]]
-                demand_driver_array = np.array([])# empty array for Ddrs as we use const_last no matetr
-            else:
-                common_years = list(map(str, common_years))
-                # Filter historical data and demand driver data to only include common years
-                historical_values = row[common_years].iloc[0].values.tolist()  # Select region and years
-                common_years = list(map(int, common_years))
-                demand_driver_array = demand_driver_data.loc[common_years].values  # Align demand driver data numpy arrray
+                raise ValueError(f"No common years between demand drivers and historical data for {region.region_name} with the set {settings_row}")
+            common_years = list(map(str, common_years))
+            # Filter historical data and demand driver data to only include common years
+            historical_values = row[common_years].iloc[0].values.tolist()  # Select region and years
+            common_years = list(map(int, common_years))
+            demand_driver_array = demand_driver_data.loc[common_years].values  # Align demand driver data numpy arrray
             # Pass the filtered data and aligned demand driver data for coefficient calculation
             coef = self.calculate_coef_for_filtered_data(
                 values=historical_values,
@@ -249,6 +244,10 @@ class Forecast:
         :return: A Coef object containing the calculated coefficients.
         """
         coef = pm.Method()  # Initialize an empty Coef object
+        # Handle the case where only one value exists (constant forecast)
+        if len(values) == 1:
+            forecast_method = ForecastMethod.CONST_LAST
+            coef.forecast_method = ForecastMethod.CONST_LAST
         # Check if the forecast method exists in the map
         if forecast_method not in forecast_methods_map:
             print(f"Warning: Forecast method '{forecast_method}' is not recognized. Using 'CONST_LAST' as fallback.") #TODO new methods are not yet added
@@ -261,16 +260,16 @@ class Forecast:
         # Validate the number of data points
         if len(values) < min_points:
             print(
-                f"Warning: Insufficient data points for method '{forecast_method.name}'. Minimum required: {min_points}.\n"
-                f"Forecast method chaged to const_last, given points: {len(values)}"
+                f"Warning: Insufficient data points for method '{forecast_method.name}'. Minimum required: {min_points}."
             )
-            coef.name = ForecastMethod.CONST_LAST
+            return coef
         try:
             # Ensure demand_driver_data is a 2D array #case when we will have a single DDr
             if len(demand_driver_data.shape) == 1:
                 demand_driver_data = demand_driver_data.reshape(-1, 1)
             # Generate coefficients using the mapped function
             coefficients,equation = generate_coef(X=demand_driver_data, y=values)
+
             # Save coefficients into the Coef object
             coef.save_coef(coefficients,equation,type_identifier)
             return coef
@@ -278,7 +277,7 @@ class Forecast:
             print(f"Error generating coefficients for method '{forecast_method}': {e}")
             return coef
 
-    def _map_filtered_demand_driver_data(self, demand_drivers, years, region_name):
+    def _map_filtered_demand_driver_data(self, demand_drivers, years, region_name, data_origin):
         aligned_DDr_df = pd.DataFrame(index=years)
         for driver_name in demand_drivers:
             if driver_name == "TIME":
@@ -289,14 +288,14 @@ class Forecast:
                 print(f"Demand driver '{driver_name}' object  not found.")
                 aligned_DDr_df[driver_name] = np.nan
                 continue
-            region_data = driver_data_object.get_data_for_region(region_name)
+            region_data = driver_data_object.get_data_for_region(region_name, data_origin)
             if region_data is not None and not region_data.empty:
                 filtered_values = _filter_values_by_year(region_data, years)
                 aligned_DDr_df[driver_name] = filtered_values
             else:
                 print(f"No data for demand driver '{driver_name}' in region '{region_name}'.")
                 aligned_DDr_df[driver_name] = np.nan
-        return aligned_DDr_df.dropna()
+        return aligned_DDr_df
 
     def process_future_projections(self, row_future_data, region_name, forecast_method, demand_drivers, type_identifier):
         """
@@ -315,7 +314,8 @@ class Forecast:
         # Extract years and values from future_data
         years = list(map(int, row_future_data.columns))
         demand_driver_data = self._map_filtered_demand_driver_data(
-            demand_drivers=demand_drivers, years=years, region_name=region_name)
+            demand_drivers=demand_drivers, years=years, region_name=region_name, data_origin="user" #Future DDr projections for intorpalation
+        )
         filtered_years = demand_driver_data.index.astype(int)
         common_years = sorted(set(filtered_years).intersection(years))  # Find common years
         if not common_years:
@@ -468,7 +468,7 @@ class Forecast:
             else:
                 data = self.demand_drivers.get_driver_data(driver)
                 if data:
-                    region_data = data.get_data_for_region(region_name)
+                    region_data = data.get_data_for_region(region_name, "user")
                     if region_data is not None and not region_data.empty:
                         # Extract the value for the specified year
                         region_data.columns = region_data.columns.map(str).str.strip() # Normalize columns

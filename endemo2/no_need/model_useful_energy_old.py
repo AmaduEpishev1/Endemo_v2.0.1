@@ -13,8 +13,7 @@ class UsefulEnergyCalculator:
         self.predictions = input
         self.all_sectors_UE = {}  # To store results  by sector
         self.calculate_useful_energy()
-        #self.write_ue_predictions_to_excel()
-        self.postprocess_ue_to_export()
+        self.write_ue_predictions_to_excel()
 
     def calculate_useful_energy(self):
         """
@@ -45,7 +44,7 @@ class UsefulEnergyCalculator:
                     technology.energy_UE = ue_per_technology_for_all_regions
                     ue_per_subsectors.append(ue_per_technology_for_all_regions) #adding  the technology to the subsector that it belongs
                 ue_per_subsector = pd.concat(ue_per_subsectors, ignore_index=True)
-                subsector.energy_UE = ue_per_subsector #TODO  for new hierarchy
+                subsector.energy_UE = ue_per_subsector #TODO i dont know why i am saving each co
                 ue_per_sector.append(ue_per_subsector)
             ue_sector = pd.concat(ue_per_sector, ignore_index=True)
             sector.energy_UE = ue_sector # now sector holds all regions which is not completly right
@@ -125,8 +124,8 @@ class UsefulEnergyCalculator:
                               "Sector": sector_name,
                               "Subsector": subsector_name,
                               "Technology": technology_name,
-                              "Type": type_name}
-                             # "Variables": variable_names} # this can help us to see which variables have been multiplied
+                              "Type": type_name,
+                              "Variables": variable_names}
                 result_row.update(results_ue_type.to_dict())
                 ue_types.append(result_row)
                 if type_name == "HEAT" and not all(df.empty for df in dfs_with_shared_type):
@@ -140,8 +139,8 @@ class UsefulEnergyCalculator:
                                       "Sector": sector_name,
                                       "Subsector": subsector_name,
                                       "Technology": technology_name,
-                                      "Type": temp_level}
-                                    #  "Variables": variable_names}
+                                      "Type": temp_level,
+                                      "Variables": variable_names}
                         temp_level_row.update(share_per_level.to_dict())
                         ue_types.append(temp_level_row)
                 # Add the results_ue_type to the aggregated total per types thus we get per technology
@@ -164,80 +163,42 @@ class UsefulEnergyCalculator:
             # }
             # aggregated_row.update(aggregated_results.to_dict())
 
+
         return  pd.concat(ue_per_technology_for_all_regions, ignore_index=True)
+
+    def write_ue_predictions_to_excel(self):
+        """
+        Write predictions to separate Excel files for each sector,
+        concatenating all forecast data into a single table per sector.
+        """
+        output_path = self.input_manager.output_path
+        os.makedirs(output_path, exist_ok=True)  # Ensure the output directory exists
+
+        for sector in self.predictions:
+            # Construct the file path for the sector
+            sector_file_path = os.path.join(output_path, f"ue_{sector.name}.xlsx")
+            # Access the sector.energy_UE DataFrame
+            if hasattr(sector, "energy_UE") and isinstance(sector.energy_UE, pd.DataFrame):
+                with pd.ExcelWriter(sector_file_path, engine="xlsxwriter") as writer:
+                    sector.energy_UE.to_excel(writer, sheet_name="Energy_UE", index=False)
+                print(f"Predictions of useful energy for sector '{sector.name}' written to {sector_file_path}")
+            else:
+                print(f"Skipping sector '{sector.name}' - 'energy_UE' is not a valid DataFrame or missing.")
 
     def export_ue_per_region_data(self, region_ue_dict, output_folder="region_ue"):
         """
         Export the useful energy data for all regions to Excel after all calculations are complete.
 
-        :param region_ue_dict: Dictionary containing UsefulEnergyRegion objects keyed by region name.
+        :param region_ue_dict: Dictionary containing UsefulenergyRegion objects keyed by region name.
         :param output_folder: Folder where the Excel files should be saved (relative to input_manager.output_path).
         """
-        # Ensure output directory exists
-        full_output_path = os.path.join(self.input_manager.output_path, output_folder)
+        # Use the output path from InputManager and append the output_folder
+        full_output_path = self.input_manager.output_path / output_folder
+        # Ensure the full output folder exists
         os.makedirs(full_output_path, exist_ok=True)
-
         # Export each region's data
         for region_name, region_ue in region_ue_dict.items():
-            if not region_ue.energy_ue:  # Check if the list of DataFrames is empty
-                print(f"Warning: No data to export for {region_name}. Skipping.")
-                continue
-            # Concatenate the list of DataFrames into a single DataFrame
-            df = pd.concat(region_ue.energy_ue, ignore_index=True)
-            # Aggregating results per Type, first per Technology and Subsector for all regions
-            agg_tech = df.groupby(['Type','Sector','Subsector','Technology']).sum(numeric_only=True)
-            # Aggregating results per Type, then per Subsector for all regions
-            agg_subsector = df.groupby(['Type','Sector', 'Subsector']).sum(numeric_only=True)
-            # Aggregating results per Type, then per Sector for all regions
-            agg_sector = df.groupby(['Type', 'Sector']).sum(numeric_only=True)
-            # Define the file path
-            file_path = os.path.join(full_output_path, f"{region_name}_UE.xlsx")
-            # Save the results to an Excel file
-            with pd.ExcelWriter(file_path) as writer:
-                df.to_excel(writer, sheet_name="UE_all", index=False)
-                agg_tech.to_excel(writer, sheet_name="Aggregated_by_Technology")
-                agg_subsector.to_excel(writer, sheet_name="Aggregated_by_Subsector")
-                agg_sector.to_excel(writer, sheet_name="Aggregated_by_Sectors")
-
-
-    def postprocess_ue_to_export (self):
-        output_dir = self.input_manager.output_path
-        for sector in self.predictions:
-            sector_name = sector.name
-            df = sector.energy_UE
-            # Aggregating results per Type, first per Technology for all regions
-            agg_tech = df.groupby(['Type','Subsector', 'Technology']).sum(numeric_only=True)
-            # Aggregating results per Type, then per Subsector for all regions
-            agg_subsector = df.groupby(['Type', 'Subsector']).sum(numeric_only=True)
-            # Aggregating results per Type, then per  Sector for all regions
-            agg_Sector = df.groupby(['Type', 'Sector']).sum(numeric_only=True)
-            # Define file path
-            file_path = os.path.join(output_dir, f"UE_{sector_name}.xlsx")
-
-            with pd.ExcelWriter(file_path) as writer:
-                df.to_excel(writer, sheet_name="UE_all")
-                agg_tech.to_excel(writer, sheet_name="Aggregated_by_Technology")
-                agg_subsector.to_excel(writer, sheet_name="Aggregated_by_Subsector")
-                agg_Sector.to_excel(writer, sheet_name="Aggregated_by_Sector")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+            region_ue.export_to_excel(full_output_path)
 
 
 

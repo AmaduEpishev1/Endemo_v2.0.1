@@ -128,7 +128,7 @@ class UsefulenergyRegion:
             name (str): The name of the region.
         """
         self.name = name  # Name of the region
-        self.energy_ue = []  # Hierarchical data structure: sector → subsector → technology → type
+        self.energy_ue = []
 
     def export_to_excel(self, output_folder):
         """
@@ -187,7 +187,6 @@ class DemandDriver:
         result = [str(driver) for driver in self.demand_drivers.values()]
         return "\n".join(result)
 
-
 class DemandDriverData:
     """
     Encapsulates data for a specific demand driver, including Historical and User data.
@@ -197,8 +196,7 @@ class DemandDriverData:
         :param name: Name of the demand driver (e.g., 'POP', 'GDP'...).
         """
         self.name = name
-        self.historical = None  # Holds historical data
-        self.user = None        # Holds user data
+        self.DDr_data = None
 
     def load_data(self, input_manager):
         """
@@ -206,47 +204,25 @@ class DemandDriverData:
         :param input_manager: InputManager instance for file path access.
         """
         try:
-            historical_path = input_manager.general_input_path / f"{self.name}_Historical.xlsx"
-            user_path = input_manager.general_input_path / f"{self.name}_User.xlsx"
-
+            input_path = input_manager.general_input_path / f"{self.name}.xlsx"
             # Load Historical data
-            if historical_path.exists():
-                self.historical = pd.read_excel(historical_path, sheet_name="Data")
+            if input_path.exists():
+                self.DDr_data = pd.read_excel(input_path, sheet_name="Data")
             else:
-                print(f"Historical file not found for {self.name}: {historical_path}")
-
-            # Load User data
-            if user_path.exists():
-                self.user = pd.read_excel(user_path, sheet_name="Data")
-            else:
-                print(f"User file not found for {self.name}: {user_path}")
+                print(f"Historical file not found for {self.name}: {input_path}")
         except Exception as e:
             print(f"Error loading data for {self.name}: {e}")
 
-    def get_data_for_region(self, region_name, data_origin):
+    def get_data_for_region(self, region_name):
         """
         Retrieve the row for a specific region from Historical or User data.
 
         :param region_name: Name of the region to fetch.
-        :param data_origin: Type of data to extract ('historical' or 'user').
         :return: DataFrame row(s) for the specified region.
         """
-        data = getattr(self, data_origin)
-        if data is None:
-            print(f"No {data_origin} data available for {self.name}.")
+        if self.DDr_data is None:
+            print(f"No data available for {self.name}.")
             return None
-
         # Fetch the row for the specified region
-        region_data = data[data["Region"] == region_name]
+        region_data = self.DDr_data[self.DDr_data["Region"] == region_name]
         return region_data
-
-    def __str__(self):
-        return (
-            f"DDr name: {self.name}\n"
-            f"  historical Data: {self.historical} rows\n"
-            f"  User Data: {self.user} rows\n"
-        )
-
-
-
-

@@ -94,7 +94,7 @@ def initialize_hierarchy_input_from_settings_data(input_manager):
                         technology.ddets.append(variable)
                 # Add Subsector to Sector
             sector.subsectors.append(subsector)
-            #print(sector)
+            print(sector)
         sectors.append(sector)
     demand_driver.read_all_demand_drivers(input_manager)
     excel_cache.clear_cache()
@@ -133,20 +133,21 @@ def load_regions_data_for_variable(variable_user_df, variable_hist_df, active_re
     Load region-specific data for a variable based on user-set and historical data.
 
     Args:
-        variable_user_df (pd.DataFrame): Filtered user-set data for variable.
-        variable_hist_df (pd.DataFrame): Filtered historical data for variable.
+        variable_user_df (pd.DataFrame): Filtered user-set data.
+        variable_hist_df (pd.DataFrame): Filtered historical data.
         active_regions (list): List of active regions to process.
     Returns:
         list: List of Region objects populated with relevant data.
     """
     settings_columns = [
                            col for col in
-                           ["Region", "Type", "Temp_level","Subtech","Drive", "Unit", "Factor", "Function", "Equation", "Forecast data", "Lower limit"]
+                           ["Region", "Type", "Temp_level", "Unit", "Factor", "Function", "Equation", "Forecast data", "Lower limit"]
                            if col in variable_user_df.columns
                        ] + [col for col in variable_user_df.columns if str(col).startswith("DDr")]
 
-    filter_columns = ["Type","Temp_level","Subtech","Drive"] #TODO
+    iteration_columns = ["Type"]
     regions = []
+
     # Filter default rows
     default_set_rows = variable_user_df[variable_user_df["Region"] == "default"]
     default_hist_rows = variable_hist_df[variable_hist_df["Region"] == "default"]
@@ -155,74 +156,36 @@ def load_regions_data_for_variable(variable_user_df, variable_hist_df, active_re
     for region_name in active_regions:
         region = Region(region_name=region_name)  # Initialize Region object
         # Get region-specific settings
-        region_set_df = get_region_data(variable_set_df, region_name, default_set_rows, filter_columns)
+        region_set_df = get_region_data(variable_set_df, region_name, default_set_rows)
         region.settings = region_set_df  # Save settings for the region
-        filtered_list = [col for col in filter_columns if col in region_set_df.columns]
 
-        if any(col in region_set_df.columns for col in filtered_list):
+        if any(col in region_set_df.columns for col in iteration_columns):
+            # Process all "Type"-specific settings in one operation
+            forecast_data_types = region_set_df[["Type", "Forecast data"]]
             # Separate historical and user-set data for all types
-            historical_rows = region_set_df[region_set_df["Forecast data"] == "Historical"]
-            user_rows = region_set_df[region_set_df["Forecast data"] != "Historical"]
+            historical_rows = forecast_data_types[forecast_data_types["Forecast data"] == "Historical"]
+            user_rows = forecast_data_types[forecast_data_types["Forecast data"] != "Historical"]
+
             if not historical_rows.empty:
-                filter_keys = [col for col in filtered_list if
-                               col in historical_rows.columns and col in variable_hist_df.columns]
-                # Extract existing region data based on filter keys
-                region_types_levels = historical_rows[filter_keys]
-
-                # Filter user data for the specific region
-                hist_data_region = variable_hist_df[
-                    (variable_hist_df["Region"] == region_name) &
-                    variable_hist_df[filter_keys].apply(tuple, axis=1).isin(region_types_levels.apply(tuple, axis=1))
-                    ]
-                # Identify missing row combinations (not just Type, but all keys)
-                missing_combinations = region_types_levels.apply(tuple, axis=1)[
-                    ~region_types_levels.apply(tuple, axis=1).isin(hist_data_region[filter_keys].apply(tuple, axis=1))
-                ]
-
-                # Get missing data from the "default" region (based on missing row combinations)
-                if not missing_combinations.empty:
-                    default_data = variable_hist_df[
-                        (variable_hist_df["Region"] == "default") &
-                        variable_hist_df[filter_keys].apply(tuple, axis=1).isin(missing_combinations)
-                        ]
-                    hist_data_region = pd.concat([hist_data_region, default_data], ignore_index=True)
-
-                region.historical = hist_data_region
+                hist_data = get_region_data(
+                    variable_hist_df, region_name, default_hist_rows
+                )[variable_hist_df["Type"].isin(historical_rows["Type"])]
+                region.historical = hist_data
 
             if not user_rows.empty:
-                filter_keys = [col for col in filtered_list if
-                               col in user_rows.columns and col in variable_user_df.columns]
-                # Extract existing region data based on filter keys
-                region_types_levels = user_rows[filter_keys]
-
-                # Filter user data for the specific region
-                user_data_region = variable_user_df[
-                    (variable_user_df["Region"] == region_name) &
-                    variable_user_df[filter_keys].apply(tuple, axis=1).isin(region_types_levels.apply(tuple, axis=1))
-                    ]
-
-                # Identify missing row combinations (not just Type, but all keys)
-                missing_combinations = region_types_levels.apply(tuple, axis=1)[
-                    ~region_types_levels.apply(tuple, axis=1).isin(user_data_region[filter_keys].apply(tuple, axis=1))
-                ]
-                # Get missing data from the "default" region (based on missing row combinations)
-                if not missing_combinations.empty:
-                    default_data = variable_user_df[
-                        (variable_user_df["Region"] == "default") &
-                        variable_user_df[filter_keys].apply(tuple, axis=1).isin(missing_combinations)
-                        ]
-                    user_data_region = pd.concat([user_data_region, default_data], ignore_index=True)
-
-                region.user = user_data_region
+                user_data = get_region_data(
+                    variable_user_df, region_name, default_set_rows
+                )[variable_user_df["Type"].isin(user_rows["Type"])]
+                region.user = user_data
 
         else:
             # Handle cases without iteration columns
             forecast_data = region.settings["Forecast data"].iloc[0]
             if forecast_data == "Historical":
-                hist_data = get_region_data(variable_hist_df, region_name, default_hist_rows,filtered_list)
+                hist_data = get_region_data(variable_hist_df, region_name, default_hist_rows)
                 region.historical = hist_data
             else:
-                user_data = get_region_data(variable_user_df, region_name, default_set_rows,filtered_list)
+                user_data = get_region_data(variable_user_df, region_name, default_set_rows)
                 region.user = user_data
         # Add the region to the list if it has relevant data
         if (region.user is not None and not region.user.empty) or (
@@ -232,34 +195,49 @@ def load_regions_data_for_variable(variable_user_df, variable_hist_df, active_re
 
     return regions
 
-def get_region_data(df, region_name, default_data, filter_columns):
-    # Filter df for the given region_name
-    region_data = df[df['Region'] == region_name]
-    if region_data.empty:
-        return clean_dataframe(default_data)
-    filtered_col = [col for col in filter_columns if col in region_data.columns]
-    if filtered_col:
-        default_data = default_data.reset_index(drop=True)
-        region_data = region_data.reset_index(drop=True)
-        # identify missing rows
-        merged = default_data.merge(region_data, on=filtered_col, how="left", indicator=True)
-        # Extract missing rows (rows that exist in default but not in region_settings)
-        missing_rows = merged[merged["_merge"] == "left_only"].drop(columns=["_merge"])
-        # Append missing rows to region dataset
-        # Drop `_x` and `_y` suffixes from duplicate columns
-        missing_rows = missing_rows.loc[:, ~missing_rows.columns.str.endswith("_y")]
-        missing_rows.columns = missing_rows.columns.str.replace("_x", "", regex=True)
-        #Ensure all columns exist before concatenation
-        common_cols = list(set(region_data.columns).intersection(set(missing_rows.columns)))
-        missing_rows = missing_rows[common_cols]
-        for col in region_data.columns:
-            if col not in missing_rows.columns:
-                missing_rows[col] = None
 
-        if not missing_rows.empty:
-            region_data = pd.concat([region_data, missing_rows], ignore_index=True)
+def get_region_data(df, region_name, default_df, value=None):
+    """
+    Retrieve region-specific data from a DataFrame, falling back to default if unavailable.
 
-    return clean_dataframe(region_data)
+    Args:
+        df (pd.DataFrame): DataFrame to filter.
+        region_name (str): Region name to filter for.
+        default_df (pd.DataFrame): Default row to return if region data is unavailable.
+        value: The value of the iteration for the df (e.g., Type, Drive).
+    Returns:
+        pd.DataFrame: Cleaned DataFrame with region-specific or default data.
+    """
+    # Initialize an empty list to collect output rows
+    if value == "HEAT":
+        if df["Temp_level"].notna().any() :
+            result_df = []
+            region_rows = df[(df["Region"] == region_name) & (df["Type"] == value)]
+            default_rows = default_df[default_df["Type"] == value]
+            for temp_level in default_rows["Temp_level"].unique():
+                # Check if this Temp_level exists in the region_rows
+                if temp_level not in region_rows["Temp_level"].values:
+                    # Append the default row for this missing Temp_level
+                    missing_row = default_rows[default_rows["Temp_level"] == temp_level]
+                    result_df.append(missing_row)
+                elif temp_level in region_rows["Temp_level"].values:
+                    region_row = region_rows[region_rows["Temp_level"] == temp_level]
+                    result_df.append(region_row)
+                else:
+                    return clean_dataframe(region_rows)
+            result_df = pd.concat(result_df, ignore_index=True)
+            return clean_dataframe(result_df)
+    if value is not None:
+        region_row = df[(df["Region"] == region_name) & (df["Type"] == value)]
+    else:
+        region_row = df[df["Region"] == region_name]
+    if region_row.empty:
+        if value is not None:
+            region_row = default_df[default_df["Type"] == value]
+        else:
+            region_row = default_df
+
+    return clean_dataframe(region_row.drop_duplicates())
 
 def clean_dataframe(df):
     if df is None:

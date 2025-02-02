@@ -59,19 +59,18 @@ def calculate_exponential_multivariable_coefficients(X: np.ndarray, y: np.ndarra
     if X.shape[0] != y.shape[0]:
         raise ValueError("Number of samples in X and y must match.")
 
-    # Define the model function
-    def exponential_model(X, k0, kn, *coeffs):
-        linear_combination = np.dot(X, coeffs)  # Compute k1 * X1 + k2 * X2 + ...
+    # Define the model function (vectorized to handle multiple samples)
+    def exponential_model(X_flat, k0, kn, *coeffs):
+        X_reshaped = X_flat.reshape(-1, len(coeffs))  # Reshape back into original feature dimensions
+        linear_combination = np.dot(X_reshaped, coeffs)  # Compute k1 * X1 + k2 * X2 + ...
         return k0 + kn * np.exp(linear_combination)
 
     # Initial guess for the parameters
     n_features = X.shape[1]
     initial_guess = [1.0] * (2 + n_features)  # [k0, kn, k1, k2, ..., kn-1]
-
-    # Fit the model using curve_fit
-    popt, _ = curve_fit(exponential_model, X, y, p0=initial_guess)
+    # Flatten X before passing to curve_fit
+    popt, _ = curve_fit(exponential_model, X.flatten(), y, p0=initial_guess) #TODO
     equation = "y = k0 + kn * exp(k1 * X1 + k2 * X2 + ... + kn-1 * Xn-1)"
-
     return popt.tolist(), equation
 
 def generate_quadratic_coefficients_multivariable(X : list, y: list):

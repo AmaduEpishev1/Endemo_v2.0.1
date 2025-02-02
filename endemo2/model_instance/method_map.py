@@ -24,6 +24,13 @@ forecast_methods_map = {
         "predict_function": ff.exp_mult_div,
         "get_eqaution_user": "y = k0 + k1 * ((1 + k2 / 100) ^ (X1 - k3)) * X2 / X3"
     },
+    ForecastMethod.MULT: {
+        "generate_coef": "",
+        "min_points": 1,
+        "save_coef": pm.Method.save_coef,
+        "predict_function": ff.calculate_mult,
+        "get_eqaution_user": "y = k0 +k1*DDr1*DDr2"
+    },
     ForecastMethod.LIN: {
         "generate_coef": cg.generate_linear_coefficients_multivariable_sklearn,
         "min_points": 2,

@@ -68,7 +68,7 @@ def calculate_lin_mult_div(coef, x_values: list) -> float:
     :return: Calculated result.
     """
     if len(x_values) != 3:
-        raise ValueError("DDr must contain exactly three elements: [X1, X2, X3].lin_mult_div")
+        print("DDr must contain exactly three elements: [X1, X2, X3].lin_mult_div")
 
     X1, X2, X3 = map(float, x_values)  # Ensure all inputs are floats
 
@@ -81,6 +81,26 @@ def calculate_lin_mult_div(coef, x_values: list) -> float:
 
     k0, k1 = coefficients
     return ((k0 + k1 * X1) * X2) / X3
+
+def calculate_mult(coef, x_values: list) -> float:
+    """
+    Perform calculation based on the formula: k0 +k1*DDr1*DDr2.
+
+    :param coef: Coefficient object containing intercept and slope.
+    :param x_values: List of independent variable values [X1, X2].
+    :return: Calculated result.
+    """
+    if len(x_values) != 2:
+        raise ValueError("DDr must contain exactly two elements: [X1, X2].mult")
+
+    X1, X2= map(float, x_values)  # Ensure all inputs are floats
+
+    coefficients = coef.coefficients  # Extract only k0 and k1
+    if len(coefficients) != 2:
+        print("MULT requires exactly two coefficients: k0 and k1.")
+
+    k0, k1 = coefficients
+    return k0 + k1 * X1* X2
 
 def exp_mult_div(coef, x_values: list) -> float:
     """
@@ -117,10 +137,8 @@ def exponential_multivariable(coef, x_values: list) -> float:
     :return: Calculated result.
     """
     coefficients = coef.coefficients  # Retrieve all coefficients
-    if len(coefficients) < 3:
-        raise ValueError("Exponential multivariable requires at least three coefficients: k0, kn, and k1.")
-
-    k0, kn = coefficients[:2]  # Intercept (k0) and exponential scaling factor (kn)
+    k0 = coefficients[0]  # Intercept (k0)
+    k1 = coefficients[1]#exponential scaling factor (kn)
     kn_minus_1 = coefficients[2:]  # Remaining coefficients [k1, k2, ..., kn-1]
 
     if len(kn_minus_1) != len(x_values):

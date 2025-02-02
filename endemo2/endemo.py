@@ -17,7 +17,7 @@ class Endemo:
         self.input_manager = None
         self.input = None
         self.forecast = None
-        self.output_manager = None  # Delay OutputManager initialization until InputManager is ready
+        self.output_manager = None  #TODO
 
     def execute_with_preprocessing(self):
         """
@@ -34,7 +34,7 @@ class Endemo:
         print("Input data successfully read.")
 
 
-        #Calculate the forecast
+        # #Calculate the forecast
         print("Do Predictions...")
         self.forecast = Forecast(self.input, demand_driver, self.input_manager)
         print("Predictions successfully done")

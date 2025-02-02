@@ -14,7 +14,7 @@ class InputManager:
     input_path = super_path / 'input'
     output_path = super_path / 'output'
     general_input_path = input_path / 'general'
-    ctrl_file = super_path / 'Set_and_Control.xlsx'
+    ctrl_file = input_path / 'Set_and_Control.xlsx'
 
     def __init__(self):
         # Read set and control parameters
@@ -23,29 +23,24 @@ class InputManager:
         # Initialize Subsectorsettings
         self.subsector_settings = Subsectorsettings(self.general_settings)
         self.subsector_settings.read_active_sector_settings(self)
-
-        self.active_sectors = self.general_settings.active_sectors
+        self.active_sectors = self.general_settings.active_sectors                                 #TODO redundant calling can call directly
         self.active_regions = self.general_settings.active_regions
-        self.sectors_path = self.get_paths_for_active_sectors(self.active_sectors)
+        self.sector_paths = self.get_data_paths()
 
-    def get_paths_for_active_sectors(self, active_sectors):
+    def get_data_paths(self):
         """
         Generate input paths for active sectors.
 
         Args:
-            active_sectors (list): A list of sector names.
-
         Returns:
             dict: A dictionary with sector names as keys and their paths as values.
         """
         sector_paths = {}
-        for sector_name in active_sectors:
-            # Build the two types of paths using the class attribute
-            hist_path = self.input_path / f"{sector_name}_hist.xlsx"
-            user_set_path = self.input_path / f"{sector_name}_user_set.xlsx"
-
-            # Store paths in a dictionary
-            sector_paths[sector_name] = {
+        # Build the two types of paths using the class attribute
+        hist_path = self.input_path / f"Historical.xlsx"
+        user_set_path = self.input_path / f"User_set.xlsx"
+        # Store paths in a dictionary
+        sector_paths = {
                 "hist_path": hist_path,
                 "user_set_path": user_set_path,
             }
